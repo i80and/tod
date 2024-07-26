@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "tod"
+version = "0.1.0"
+description = ""
+authors = ["Heli Aldridge <heli@heli.pet>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+ollama = "^0.3.0"
+
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.4.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
