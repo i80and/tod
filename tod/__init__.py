@@ -1,8 +1,13 @@
 import ollama
 import asyncio
+import logging
+
+logger = logging.getLogger("tod")
 
 MAIN_MODEL = "mistral-nemo:latest"
-MATH_MODEL = "wizard-math:13b-fp16"
+MATH_MODEL = "mathstral:7b-v0.1-q4_K_M"
+
+MISTRAL_NEMO_TEMPERATURE = 0.3
 
 
 async def summarize(client: ollama.AsyncClient, text: str) -> str:
@@ -11,15 +16,43 @@ async def summarize(client: ollama.AsyncClient, text: str) -> str:
         messages=[
             {
                 "role": "system",
-                "content": "You will summarize text as concisely and correctly as you can, and not say anything else.",
+                "content": "Summarize text as concisely and correctly as you can, and do not say anything else. Remove all LaTeX commands.",
             },
             {"role": "user", "content": text},
         ],
+        options={"temperature": 0.0},
     )
     return response["message"]["content"]
 
 
+async def do_math(client: ollama.AsyncClient, question: str) -> str:
+    response = await client.chat(
+        model=MATH_MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": "Correctly and carefully solve the problem posed. Think step by step.",
+            },
+            {"role": "user", "content": question},
+        ],
+        options={"temperature": 0.0},
+    )
+    return response["message"]["content"]
+
+
+async def do_chat(client: ollama.AsyncClient, messages, tools=None):
+    response = await client.chat(
+        model=MAIN_MODEL,
+        messages=messages,
+        tools=tools,
+        options={"temperature": MISTRAL_NEMO_TEMPERATURE},
+    )
+    return response["message"]
+
+
 async def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+
     client = ollama.AsyncClient()
     messages = [
         {
@@ -31,10 +64,9 @@ async def main() -> None:
     while True:
         query = input("> ")
         messages.append({"role": "user", "content": query})
-        response = await client.chat(
-            model=MAIN_MODEL,
+        response = await do_chat(
+            client,
             messages=messages,
-            # provide a weather checking tool to the model
             tools=[
                 {
                     "type": "function",
@@ -73,26 +105,28 @@ async def main() -> None:
             ],
         )
 
-        messages.append(response["message"])
+        messages.append(response)
 
-        if response["message"].get("tool_calls"):
-            for tool in response["message"]["tool_calls"]:
-                print("Using tool: " + tool["function"]["name"])
-                if tool["function"]["name"] == "get_current_weather":
-                    response = "Sunny and 30 degrees Celsius"
-                    messages.append({"role": "tool", "content": response})
-                elif tool["function"]["name"] == "perform_mathematical_reasoning":
-                    response = await client.generate(
-                        model=MATH_MODEL,
-                        prompt=tool["function"]["arguments"]["question"],
+        if response.get("tool_calls"):
+            for tool in response["tool_calls"]:
+                logger.info("Using tool: %s", tool["function"]["name"])
+                if tool["function"]["name"] == "perform_mathematical_reasoning":
+                    logger.info(
+                        "math question: %s",
+                        repr(tool["function"]["arguments"]["question"]),
                     )
-                    summarized_response = await summarize(client, response["response"])
-
+                    math_response = await do_math(
+                        client, tool["function"]["arguments"]["question"]
+                    )
+                    logger.info("math_response: %s", repr(math_response))
+                    summarized_response = await summarize(client, math_response)
+                    logger.info("summarized_response: %s", repr(summarized_response))
                     messages.append({"role": "tool", "content": summarized_response})
 
-            response = await client.chat(model=MAIN_MODEL, messages=messages)
+            response = await do_chat(client, messages)
 
-        print(response["message"]["content"])
+        print()
+        print(response["content"])
 
 
 if __name__ == "__main__":
