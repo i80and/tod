@@ -4,10 +4,8 @@ import logging
 
 logger = logging.getLogger("tod")
 
-MAIN_MODEL = "mistral-nemo:latest"
+MAIN_MODEL = "mistral-nemo:12b-instruct-2407-q8_0"
 MATH_MODEL = "mathstral:7b-v0.1-q4_K_M"
-
-MISTRAL_NEMO_TEMPERATURE = 0.3
 
 
 async def summarize(client: ollama.AsyncClient, text: str) -> str:
@@ -31,7 +29,7 @@ async def do_math(client: ollama.AsyncClient, question: str) -> str:
         messages=[
             {
                 "role": "system",
-                "content": "Correctly and carefully solve the problem posed. Think step by step.",
+                "content": "Correctly and carefully solve the problem posed. Do not make up information. If the question is incomplete, just say so. Think step by step.",
             },
             {"role": "user", "content": question},
         ],
@@ -45,19 +43,28 @@ async def do_chat(client: ollama.AsyncClient, messages, tools=None):
         model=MAIN_MODEL,
         messages=messages,
         tools=tools,
-        options={"temperature": MISTRAL_NEMO_TEMPERATURE},
+        options={"temperature": 0.3},
     )
     return response["message"]
 
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     client = ollama.AsyncClient()
     messages = [
         {
             "role": "system",
-            "content": "You are an AI assistant named Tod. You will concisely answer questions, but never make up information unless asked to do so. If you do not know the answer, you will say so. You are friendly and warm and have a fatherly tone.",
+            "content": " ".join(
+                [
+                    "You are an AI assistant named Tod.",
+                    "You will answer questions, but never make up information unless asked to do so.",
+                    "If you do not know the answer, you will say so.",
+                    "You will include all context and information when invoking tools.",
+                    "You are friendly and warm and have a fatherly tone.",
+                ]
+            ),
         }
     ]
 
@@ -111,19 +118,14 @@ async def main() -> None:
             for tool in response["tool_calls"]:
                 logger.info("Using tool: %s", tool["function"]["name"])
                 if tool["function"]["name"] == "perform_mathematical_reasoning":
-                    logger.info(
-                        "math question: %s",
-                        repr(tool["function"]["arguments"]["question"]),
-                    )
-                    math_response = await do_math(
-                        client, tool["function"]["arguments"]["question"]
-                    )
+                    math_response = await do_math(client, query)
                     logger.info("math_response: %s", repr(math_response))
                     summarized_response = await summarize(client, math_response)
                     logger.info("summarized_response: %s", repr(summarized_response))
                     messages.append({"role": "tool", "content": summarized_response})
 
             response = await do_chat(client, messages)
+            messages.append(response)
 
         print()
         print(response["content"])
